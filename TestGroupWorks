@@ -167,3 +167,169 @@ hello
 puki kaki
 ^
 |
+666
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+
+/**
+ * Перечисление критических уровней опасности.
+ */
+enum AlertLevel {
+    STABLE, CAUTION, CRITICAL, SELF_DESTRUCT
+}
+
+/**
+ * Кастомное исключение для сбоев систем.
+ */
+class SystemFailureException extends Exception {
+    public SystemFailureException(String message) {
+        super(message);
+    }
+}
+
+/**
+ * Обобщенный интерфейс для любого активного модуля.
+ */
+interface Module extends Runnable {
+    String getModuleName();
+    void performMaintenance();
+    boolean isAlive();
+}
+
+/**
+ * Базовый класс для всех отсеков станции.
+ */
+abstract class SpaceSector {
+    protected String sectorId;
+    protected AlertLevel status = AlertLevel.STABLE;
+
+    public SpaceSector(String id) { this.sectorId = id; }
+    public abstract void reportStatus();
+}
+
+/**
+ * Реакторный отсек — работает в отдельном потоке.
+ */
+class NuclearReactor extends SpaceSector implements Module {
+    private double temperature = 300.0;
+    private final double MAX_TEMP = 1500.0;
+    private final AtomicBoolean running = new AtomicBoolean(true);
+
+    public NuclearReactor(String id) { super(id); }
+
+    @Override
+    public String getModuleName() { return "Core-Reactor-" + sectorId; }
+
+    @Override
+    public void run() {
+        try {
+            while (running.get() && temperature < MAX_TEMP) {
+                // Имитация нагрева
+                temperature += Math.random() * 50;
+                if (temperature > 1000) status = AlertLevel.CRITICAL;
+                
+                System.out.printf("[REACTOR] Текущая температура: %.2f K\n", temperature);
+                
+                if (temperature >= MAX_TEMP) {
+                    throw new SystemFailureException("МЕЛТДАУН РЕАКТОРА!");
+                }
+                Thread.sleep(800);
+            }
+        } catch (SystemFailureException | InterruptedException e) {
+            System.err.println("!!! КРИТИЧЕСКАЯ ОШИБКА: " + e.getMessage());
+            status = AlertLevel.SELF_DESTRUCT;
+            running.set(false);
+        }
+    }
+
+    @Override
+    public void performMaintenance() {
+        System.out.println("-> Охлаждение реактора...");
+        temperature -= 200;
+        if (temperature < 1000) status = AlertLevel.STABLE;
+    }
+
+    @Override
+    public boolean isAlive() { return running.get(); }
+
+    @Override
+    public void reportStatus() {
+        System.out.println("Сектор " + sectorId + " статус: " + status);
+    }
+}
+
+/**
+ * Система управления мостиком (Менеджер всех модулей).
+ */
+class CommandBridge<T extends Module> {
+    private final List<T> activeModules = new CopyOnWriteArrayList<>();
+    private final ExecutorService processor = Executors.newCachedThreadPool();
+
+    public void plugInModule(T module) {
+        activeModules.add(module);
+        processor.execute(module);
+        System.out.println("Модуль [" + module.getModuleName() + "] запущен в отдельном потоке.");
+    }
+
+    public void monitorStation() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.scheduleAtFixedRate(() -> {
+            System.out.println("\n=== ОТЧЕТ КОМАНДНОГО МОСТИКА ===");
+            long broken = activeModules.stream().filter(m -> !m.isAlive()).count();
+            
+            if (broken > 0) {
+                System.err.println("ВНИМАНИЕ: Обнаружено " + broken + " неисправных модулей!");
+                // Попытка авто-починки через лямбду
+                activeModules.stream().filter(m -> !m.isAlive()).forEach(m -> {
+                    System.out.println("Попытка перезапуска " + m.getModuleName());
+                });
+            } else {
+                System.out.println("Все системы в норме. Экипаж может спать.");
+            }
+        }, 2, 3, TimeUnit.SECONDS);
+    }
+
+    public void emergencyMaintenance() {
+        System.out.println("\n[!] Принудительное обслуживание всех систем...");
+        activeModules.forEach(Module::performMaintenance);
+    }
+
+    public void shutdown() {
+        processor.shutdownNow();
+    }
+}
+
+/**
+ * Главный запуск симуляции.
+ */
+public class DeepSpaceStation {
+    public static void main(String[] args) {
+        System.out.println("=== Инициализация станции 'Deep Space 9' ===\n");
+
+        CommandBridge<Module> bridge = new CommandBridge<>();
+
+        // Создаем и подключаем модули
+        NuclearReactor mainCore = new NuclearReactor("ALPHA-1");
+        NuclearReactor backupCore = new NuclearReactor("BETA-2");
+
+        bridge.plugInModule(mainCore);
+        bridge.plugInModule(backupCore);
+
+        // Запускаем фоновый мониторинг
+        bridge.monitorStation();
+
+        // Главный цикл управления пользователем
+        Scanner scanner = new Scanner(System.in);
+        for (int i = 0; i < 5; i++) {
+            System.out.println("\nНажмите ENTER для проведения тех-обслуживания...");
+            scanner.nextLine();
+            bridge.emergencyMaintenance();
+        }
+
+        System.out.println("Завершение миссии.");
+        bridge.shutdown();
+        System.exit(0);
+    }
+}
